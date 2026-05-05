@@ -110,6 +110,37 @@ describe("AcpSessionRuntime", () => {
     ),
   );
 
+  it.effect(
+    "can start an ACP session without sending authenticate when auth is not required",
+    () => {
+      const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+      return Effect.gen(function* () {
+        const runtime = yield* AcpSessionRuntime;
+        const started = yield* runtime.start();
+
+        expect(started.sessionId).toBe("mock-session-1");
+        expect(requestEvents.some((event) => event.method === "authenticate")).toBe(false);
+      }).pipe(
+        Effect.provide(
+          AcpSessionRuntime.layer({
+            spawn: {
+              command: bunExe,
+              args: [mockAgentPath],
+            },
+            cwd: process.cwd(),
+            clientInfo: { name: "t3-test", version: "0.0.0" },
+            requestLogger: (event) =>
+              Effect.sync(() => {
+                requestEvents.push(event);
+              }),
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(NodeServices.layer),
+      );
+    },
+  );
+
   it.effect("segments assistant text around ACP tool calls", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime;

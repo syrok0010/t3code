@@ -230,6 +230,7 @@ describe("AcpRuntimeModel", () => {
     expect(contentResult.events).toEqual([
       {
         _tag: "ContentDelta",
+        streamKind: "assistant_text",
         text: "hello from acp",
         rawPayload: {
           sessionId: "session-1",
@@ -239,6 +240,91 @@ describe("AcpRuntimeModel", () => {
               type: "text",
               text: "hello from acp",
             },
+          },
+        },
+      },
+    ]);
+
+    const thoughtResult = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: {
+          type: "text",
+          text: "thinking",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(thoughtResult.events).toEqual([
+      {
+        _tag: "ContentDelta",
+        streamKind: "reasoning_text",
+        text: "thinking",
+        rawPayload: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "thinking",
+            },
+          },
+        },
+      },
+    ]);
+  });
+
+  it("projects Gemini-specific ACP usage and metadata updates", () => {
+    const usageResult = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 123,
+        size: 456,
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(usageResult.events).toEqual([
+      {
+        _tag: "UsageUpdated",
+        usage: {
+          usedTokens: 123,
+          maxTokens: 456,
+        },
+        rawPayload: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 123,
+            size: 456,
+          },
+        },
+      },
+    ]);
+
+    const metadataResult = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: " Gemini thread ",
+        updatedAt: "2026-04-18T15:00:00.000Z",
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(metadataResult.events).toEqual([
+      {
+        _tag: "ThreadMetadataUpdated",
+        name: "Gemini thread",
+        metadata: {
+          updatedAt: "2026-04-18T15:00:00.000Z",
+        },
+        rawPayload: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "session_info_update",
+            title: " Gemini thread ",
+            updatedAt: "2026-04-18T15:00:00.000Z",
           },
         },
       },

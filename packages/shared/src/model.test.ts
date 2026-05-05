@@ -11,13 +11,17 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
+  geminiCapabilitiesForModel,
+  getGeminiThinkingConfigKind,
+  getGeminiThinkingModelAlias,
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
-  getProviderOptionDescriptors,
   getProviderOptionBooleanSelectionValue,
+  getProviderOptionDescriptors,
   getProviderOptionStringSelectionValue,
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
+  resolveApiModelId,
   resolveModelSlugForProvider,
   resolveSelectableModel,
   trimOrNull,
@@ -226,5 +230,89 @@ describe("descriptor helpers", () => {
     ).toBeUndefined();
     expect(getModelSelectionStringOptionValue(selection, "reasoningEffort")).toBe("high");
     expect(getModelSelectionBooleanOptionValue(selection, "fastMode")).toBe(true);
+  });
+});
+
+describe("gemini helpers", () => {
+  it("classifies Gemini families for thinking controls", () => {
+    expect(getGeminiThinkingConfigKind("auto-gemini-3")).toBe("level");
+    expect(getGeminiThinkingConfigKind("gemini-3.1-pro-preview")).toBe("level");
+    expect(getGeminiThinkingConfigKind("auto-gemini-2.5")).toBe("budget");
+    expect(getGeminiThinkingConfigKind("gemini-2.5-flash")).toBe("budget");
+  });
+
+  it("infers Gemini capabilities by family", () => {
+    expect(geminiCapabilitiesForModel("gemini-3.1-pro-preview")).toEqual(
+      createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "thinking",
+            label: "Thinking",
+            type: "select",
+            options: [
+              { id: "HIGH", label: "High", isDefault: true },
+              { id: "LOW", label: "Low" },
+            ],
+            currentValue: "HIGH",
+          },
+        ],
+      }),
+    );
+    expect(geminiCapabilitiesForModel("gemini-2.5-flash")).toEqual(
+      createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "thinking",
+            label: "Thinking",
+            type: "select",
+            options: [
+              { id: "-1", label: "Dynamic", isDefault: true },
+              { id: "512", label: "512 Tokens" },
+            ],
+            currentValue: "-1",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("builds Gemini thinking aliases from generic selection arrays", () => {
+    expect(getGeminiThinkingModelAlias("auto-gemini-3", [{ id: "thinking", value: "LOW" }])).toBe(
+      "t3code-gemini-auto-gemini-3-thinking-level-low",
+    );
+    expect(getGeminiThinkingModelAlias("gemini-2.5-pro", [{ id: "thinking", value: "-1" }])).toBe(
+      "t3code-gemini-gemini-2-5-pro-thinking-budget-dynamic",
+    );
+    expect(
+      getGeminiThinkingModelAlias("gemini-2.5-flash", [{ id: "thinking", value: "0" }]),
+    ).toBeNull();
+  });
+});
+
+describe("resolveApiModelId", () => {
+  it("appends [1m] suffix for Claude 1m context windows", () => {
+    expect(
+      resolveApiModelId(
+        createModelSelection("claudeAgent", "claude-opus-4-6", [
+          { id: "contextWindow", value: "1m" },
+        ]),
+      ),
+    ).toBe("claude-opus-4-6[1m]");
+  });
+
+  it("maps Gemini thinking selections to generated aliases", () => {
+    expect(
+      resolveApiModelId(
+        createModelSelection("gemini", "auto-gemini-3", [{ id: "thinking", value: "LOW" }]),
+      ),
+    ).toBe("t3code-gemini-auto-gemini-3-thinking-level-low");
+  });
+
+  it("returns the original model when Gemini selection is unsupported", () => {
+    expect(
+      resolveApiModelId(
+        createModelSelection("gemini", "gemini-2.5-flash", [{ id: "thinking", value: "0" }]),
+      ),
+    ).toBe("gemini-2.5-flash");
   });
 });

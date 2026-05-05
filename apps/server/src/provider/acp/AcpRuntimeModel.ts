@@ -66,8 +66,25 @@ export type AcpParsedSessionEvent =
     }
   | {
       readonly _tag: "ContentDelta";
+      readonly streamKind: "assistant_text" | "reasoning_text";
       readonly itemId?: string;
       readonly text: string;
+      readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "UsageUpdated";
+      readonly usage: {
+        readonly usedTokens: number;
+        readonly maxTokens?: number;
+      };
+      readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "ThreadMetadataUpdated";
+      readonly name: string;
+      readonly metadata?: {
+        readonly updatedAt: string;
+      };
       readonly rawPayload: unknown;
     };
 
@@ -468,7 +485,45 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
       if (upd.content.type === "text" && upd.content.text.length > 0) {
         events.push({
           _tag: "ContentDelta",
+          streamKind: "assistant_text",
           text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "agent_thought_chunk": {
+      if (upd.content.type === "text" && upd.content.text.length > 0) {
+        events.push({
+          _tag: "ContentDelta",
+          streamKind: "reasoning_text",
+          text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "usage_update": {
+      if (upd.used > 0) {
+        events.push({
+          _tag: "UsageUpdated",
+          usage: {
+            usedTokens: upd.used,
+            ...(upd.size > 0 ? { maxTokens: upd.size } : {}),
+          },
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "session_info_update": {
+      const name = upd.title?.trim() ?? "";
+      if (name.length > 0) {
+        const updatedAt = upd.updatedAt?.trim();
+        events.push({
+          _tag: "ThreadMetadataUpdated",
+          name,
+          ...(updatedAt ? { metadata: { updatedAt } } : {}),
           rawPayload: params,
         });
       }

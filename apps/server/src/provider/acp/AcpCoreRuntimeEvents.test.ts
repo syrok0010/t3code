@@ -122,6 +122,7 @@ describe("AcpCoreRuntimeEvents", () => {
         provider: ProviderDriverKind.make("cursor"),
         threadId: "thread-1" as never,
         turnId,
+        streamKind: "assistant_text",
         itemId: "assistant:session-1:segment:0",
         text: "hello",
         rawPayload: { sessionId: "session-1" },

@@ -480,6 +480,7 @@ describe("resolveThreadStatusPill", () => {
     interactionMode: "plan" as const,
     latestTurn: null,
     lastVisitedAt: undefined,
+    updatedAt: "2026-03-09T10:05:00.000Z",
     session: {
       provider: ProviderDriverKind.make("codex"),
       status: "running" as const,

@@ -20,6 +20,7 @@ import {
   hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
+  PROVIDER_OPTIONS,
 } from "./session-logic";
 
 function makeActivity(overrides: {
@@ -110,6 +111,32 @@ describe("derivePendingApprovals", () => {
         requestKind: "command",
         createdAt: "2026-02-23T00:00:01.000Z",
         detail: "pwd",
+      },
+    ]);
+  });
+
+  it("keeps unknown approval requests visible as generic approvals", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-open-unknown",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-unknown",
+          requestType: "unknown",
+          detail: "Requesting plan approval for: /tmp/plan.md",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-unknown",
+        requestKind: "generic",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        detail: "Requesting plan approval for: /tmp/plan.md",
       },
     ]);
   });
@@ -1384,6 +1411,38 @@ describe("deriveWorkLogEntries context window handling", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
+  });
+});
+
+describe("PROVIDER_OPTIONS", () => {
+  it("advertises the available providers", () => {
+    const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
+    const gemini = PROVIDER_OPTIONS.find((option) => option.value === "gemini");
+    const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
+
+    expect(PROVIDER_OPTIONS).toEqual([
+      { value: "codex", label: "Codex", available: true },
+      { value: "claudeAgent", label: "Claude", available: true },
+      { value: "gemini", label: "Gemini", available: true },
+      { value: "opencode", label: "OpenCode", available: true, pickerSidebarBadge: "new" },
+      { value: "cursor", label: "Cursor", available: true, pickerSidebarBadge: "new" },
+    ]);
+    expect(claude).toEqual({
+      value: "claudeAgent",
+      label: "Claude",
+      available: true,
+    });
+    expect(gemini).toEqual({
+      value: "gemini",
+      label: "Gemini",
+      available: true,
+    });
+    expect(cursor).toEqual({
+      value: "cursor",
+      label: "Cursor",
+      available: true,
+      pickerSidebarBadge: "new",
+    });
   });
 });
 

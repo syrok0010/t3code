@@ -899,6 +899,48 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("persists the updated resume cursor after rollback on an active session", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+
+      const session = yield* provider.startSession(asThreadId("thread-rollback-persist"), {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId: asThreadId("thread-rollback-persist"),
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const rolledBackResumeCursor = {
+        sessionId: "gemini-session-after-rollback",
+        snapshots: [
+          {
+            turnId: "turn-after-rollback",
+            sessionId: "snapshot-session-after-rollback",
+            items: [],
+          },
+        ],
+      };
+      routing.codex.updateSession(session.threadId, (existing) => ({
+        ...existing,
+        resumeCursor: rolledBackResumeCursor,
+        updatedAt: new Date(Date.now() + 1_000).toISOString(),
+      }));
+
+      yield* provider.rollbackConversation({
+        threadId: session.threadId,
+        numTurns: 1,
+      });
+
+      const directory = yield* ProviderSessionDirectory;
+      const binding = yield* directory.getBinding(session.threadId);
+      assert.equal(Option.isSome(binding), true);
+      if (Option.isSome(binding)) {
+        assert.deepEqual(binding.value.resumeCursor, rolledBackResumeCursor);
+      }
+    }),
+  );
+
   it.effect("preserves the persisted binding when stopping a session", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;

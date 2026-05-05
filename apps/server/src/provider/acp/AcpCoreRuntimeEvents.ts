@@ -218,6 +218,7 @@ export function makeAcpContentDeltaEvent(input: {
   readonly provider: ProviderDriverKind;
   readonly threadId: ThreadId;
   readonly turnId: TurnId | undefined;
+  readonly streamKind: "assistant_text" | "reasoning_text";
   readonly itemId?: string;
   readonly text: string;
   readonly rawPayload: unknown;
@@ -230,7 +231,7 @@ export function makeAcpContentDeltaEvent(input: {
     turnId: input.turnId,
     ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
     payload: {
-      streamKind: "assistant_text",
+      streamKind: input.streamKind,
       delta: input.text,
     },
     raw: {
