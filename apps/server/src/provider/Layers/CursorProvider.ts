@@ -29,6 +29,7 @@ import {
   type CommandResult,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("cursor");
@@ -597,6 +598,15 @@ export const discoverCursorModelCapabilitiesViaAcp = (
           );
         }
 
+        type CursorAcpProbeResult =
+          | { readonly _tag: "skipped" }
+          | {
+              readonly _tag: "success";
+              readonly slug: string;
+              readonly capabilities: ModelCapabilities;
+            }
+          | { readonly _tag: "failed"; readonly slug: string };
+
         const probedCapabilities = yield* Effect.forEach(
           modelChoices,
           (modelChoice) => {
@@ -606,9 +616,7 @@ export const discoverCursorModelCapabilitiesViaAcp = (
               !targetModelSlugs.has(modelSlug) ||
               capabilitiesBySlug.has(modelSlug)
             ) {
-              return Effect.void.pipe(
-                Effect.as<readonly [string, ModelCapabilities] | undefined>(undefined),
-              );
+              return Effect.succeed<CursorAcpProbeResult>({ _tag: "skipped" });
             }
 
             return withCursorAcpProbeRuntime(
@@ -635,10 +643,11 @@ export const discoverCursorModelCapabilitiesViaAcp = (
                           .pipe(
                             Effect.map((response) => response.configOptions ?? probeConfigOptions),
                           );
-                  return [
-                    modelSlug,
-                    buildCursorCapabilitiesFromConfigOptions(nextConfigOptions),
-                  ] as const;
+                  return {
+                    _tag: "success",
+                    slug: modelSlug,
+                    capabilities: buildCursorCapabilitiesFromConfigOptions(nextConfigOptions),
+                  } as CursorAcpProbeResult;
                 }),
               environment,
             ).pipe(
@@ -646,21 +655,29 @@ export const discoverCursorModelCapabilitiesViaAcp = (
               Effect.retry({ times: 3 }),
               Effect.withSpan("cursor-acp-model-capability-probe"),
               Effect.catchCause((cause) =>
-                Effect.logWarning("Cursor ACP capability probe failed", {
+                Effect.logDebug("Cursor ACP capability probe failed", {
                   modelSlug,
                   cause: Cause.pretty(cause),
-                }),
+                }).pipe(Effect.as<CursorAcpProbeResult>({ _tag: "failed", slug: modelSlug })),
               ),
             );
           },
           { concurrency: CURSOR_ACP_MODEL_DISCOVERY_CONCURRENCY },
         );
 
+        const failedModels: Array<string> = [];
         for (const entry of probedCapabilities) {
-          if (!entry) {
-            continue;
+          if (entry._tag === "failed") {
+            failedModels.push(entry.slug);
+          } else if (entry._tag === "success") {
+            capabilitiesBySlug.set(entry.slug, entry.capabilities);
           }
-          capabilitiesBySlug.set(entry[0], entry[1]);
+        }
+
+        if (failedModels.length > 0) {
+          yield* Effect.logWarning(
+            `Cursor ACP capability probe failed for ${failedModels.length} model(s) — Cursor Agent may be unresponsive`,
+          );
         }
 
         return buildCursorDiscoveredModels(
@@ -721,6 +738,14 @@ export function buildCursorProviderSnapshot(input: {
   readonly discoveryWarning?: string;
 }): ServerProviderDraft {
   const message = joinProviderMessages(input.parsed.message, input.discoveryWarning);
+  const usageLimits =
+    input.parsed.auth.status === "authenticated"
+      ? makeUnavailableUsageLimits({
+          source: "cursorAcp",
+          checkedAt: input.checkedAt,
+          reason: "Cursor Agent CLI does not expose usage information",
+        })
+      : undefined;
   return buildServerProvider({
     presentation: CURSOR_PRESENTATION,
     enabled: input.cursorSettings.enabled,
@@ -738,6 +763,7 @@ export function buildCursorProviderSnapshot(input: {
         input.discoveryWarning && input.parsed.status === "ready" ? "warning" : input.parsed.status,
       auth: input.parsed.auth,
       ...(message ? { message } : {}),
+      ...(usageLimits ? { usageLimits } : {}),
     },
   });
 }

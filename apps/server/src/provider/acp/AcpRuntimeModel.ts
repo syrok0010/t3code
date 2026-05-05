@@ -78,6 +78,11 @@ export type AcpParsedSessionEvent =
         readonly maxTokens?: number;
       };
       readonly rawPayload: unknown;
+      readonly payload?: {
+        readonly size: number;
+        readonly used: number;
+        readonly rawPayload: unknown;
+      };
     }
   | {
       readonly _tag: "ThreadMetadataUpdated";
@@ -512,6 +517,18 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
             ...(upd.size > 0 ? { maxTokens: upd.size } : {}),
           },
           rawPayload: params,
+          ...(Number.isFinite(upd.size) &&
+          Number.isFinite(upd.used) &&
+          upd.size > 0 &&
+          upd.used >= 0
+            ? {
+                payload: {
+                  size: upd.size,
+                  used: upd.used,
+                  rawPayload: params,
+                },
+              }
+            : {}),
         });
       }
       break;

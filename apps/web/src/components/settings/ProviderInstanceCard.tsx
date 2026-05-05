@@ -10,6 +10,7 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
 
 import { cn } from "../../lib/utils";
@@ -31,6 +32,76 @@ import {
   getProviderVersionLabel,
   type ProviderStatusKey,
 } from "./providerStatus";
+
+function usageBarColor(percent: number): string {
+  if (percent >= 90) return "bg-destructive";
+  if (percent >= 75) return "bg-warning";
+  return "bg-foreground";
+}
+
+function ProviderUsageBars(props: {
+  readonly usageLimits: ServerProviderUsageLimits | undefined;
+  readonly enabled: boolean;
+}) {
+  if (!props.enabled || !props.usageLimits) return null;
+
+  const { usageLimits } = props;
+
+  if (!usageLimits.available) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        {usageLimits.reason ?? "Usage data unavailable"}
+      </p>
+    );
+  }
+
+  if (usageLimits.windows.length === 0) return null;
+
+  return (
+    <div className="mt-4 grid gap-3">
+      {usageLimits.windows.map((window) => {
+        const color = usageBarColor(window.usedPercent);
+        const roundedPercent = Math.round(window.usedPercent);
+        const remainingPercent = 100 - roundedPercent;
+
+        const resetDateStr = window.resetsAt
+          ? new Date(window.resetsAt).toLocaleString("en-GB", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : null;
+
+        return (
+          <div key={window.label} className="grid gap-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-foreground">{window.label}</span>
+              <span className="text-muted-foreground">{remainingPercent}% remaining</span>
+            </div>
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label={`${window.label} usage ${roundedPercent}% used`}
+              aria-valuenow={roundedPercent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className={cn("h-full rounded-full transition-all", color)}
+                style={{ width: `${Math.max(0, Math.min(100, window.usedPercent))}%` }}
+              />
+            </div>
+            {resetDateStr && (
+              <div className="text-[11px] text-muted-foreground">Resets {resetDateStr}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const PROVIDER_ACCENT_SWATCHES = [
   "#2563eb",
@@ -626,6 +697,7 @@ export function ProviderInstanceCard({
               )}
               {summary.detail ? <span>- {summary.detail}</span> : null}
             </p>
+            <ProviderUsageBars usageLimits={liveProvider?.usageLimits} enabled={enabled} />
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             <Button

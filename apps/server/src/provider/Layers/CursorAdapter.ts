@@ -57,6 +57,7 @@ import {
   makeAcpRequestOpenedEvent,
   makeAcpRequestResolvedEvent,
   makeAcpToolCallEvent,
+  makeAcpUsageUpdatedEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import {
   type AcpSessionMode,
@@ -800,6 +801,26 @@ export function makeCursorAdapter(
                     );
                     return;
                   case "UsageUpdated":
+                    if (event.payload) {
+                      yield* logNative(
+                        ctx.threadId,
+                        "session/update",
+                        event.payload.rawPayload,
+                        "acp.jsonrpc",
+                      );
+                      yield* offerRuntimeEvent(
+                        makeAcpUsageUpdatedEvent({
+                          stamp: yield* makeEventStamp(),
+                          provider: PROVIDER,
+                          threadId: ctx.threadId,
+                          turnId: ctx.activeTurnId,
+                          size: event.payload.size,
+                          used: event.payload.used,
+                          rawPayload: event.payload.rawPayload,
+                        }),
+                      );
+                    }
+                    return;
                   case "ThreadMetadataUpdated":
                     return;
                 }
