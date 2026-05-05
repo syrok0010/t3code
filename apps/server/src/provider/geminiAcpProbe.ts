@@ -18,7 +18,7 @@ import { makeGeminiAcpRuntime } from "./acp/GeminiAcpSupport.ts";
 import { readGeminiLaunchEnv } from "./geminiCliFiles.ts";
 import { asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
-const GEMINI_ACP_PROBE_TIMEOUT_MS = 8_000;
+const GEMINI_ACP_PROBE_TIMEOUT_MS = 30_000;
 const GEMINI_ACP_AUTH_REQUIRED_CODE = -32_000;
 
 export {
