@@ -806,6 +806,7 @@ export function makeCursorAdapter(
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
+                        streamKind: event.streamKind,
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
@@ -816,19 +817,29 @@ export function makeCursorAdapter(
                     yield* logNative(
                       ctx.threadId,
                       "session/update",
-                      event.payload.rawPayload,
+                      event.rawPayload,
                       "acp.jsonrpc",
                     );
-                    yield* offerRuntimeEvent(
-                      makeAcpUsageUpdatedEvent({
-                        stamp: yield* makeEventStamp(),
-                        provider: PROVIDER,
-                        threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
-                        size: event.payload.size,
-                        used: event.payload.used,
-                        rawPayload: event.payload.rawPayload,
-                      }),
+                    if (event.usage.maxTokens !== undefined) {
+                      yield* offerRuntimeEvent(
+                        makeAcpUsageUpdatedEvent({
+                          stamp: yield* makeEventStamp(),
+                          provider: PROVIDER,
+                          threadId: ctx.threadId,
+                          turnId: ctx.activeTurnId,
+                          size: event.usage.maxTokens,
+                          used: event.usage.usedTokens,
+                          rawPayload: event.rawPayload,
+                        }),
+                      );
+                    }
+                    return;
+                  case "ThreadMetadataUpdated":
+                    yield* logNative(
+                      ctx.threadId,
+                      "session/update",
+                      event.rawPayload,
+                      "acp.jsonrpc",
                     );
                     return;
                 }

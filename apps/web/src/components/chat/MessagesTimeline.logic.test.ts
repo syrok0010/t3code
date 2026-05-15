@@ -4,6 +4,7 @@ import {
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  resolveCompactWorkEntryHeading,
   resolveAssistantMessageCopyState,
 } from "./MessagesTimeline.logic";
 
@@ -147,6 +148,29 @@ describe("normalizeCompactToolLabel", () => {
 
   it("removes trailing completion wording from other labels", () => {
     expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  });
+});
+
+describe("resolveCompactWorkEntryHeading", () => {
+  it("uses the command as the heading for generic command tool labels", () => {
+    expect(
+      resolveCompactWorkEntryHeading({
+        label: "Ran command",
+        toolTitle: "Ran command",
+        command: "git status --short",
+        itemType: "command_execution",
+      }),
+    ).toBe("git status --short");
+  });
+
+  it("keeps specific non-command tool titles as headings", () => {
+    expect(
+      resolveCompactWorkEntryHeading({
+        label: "Read file",
+        toolTitle: "Read file",
+        itemType: "dynamic_tool_call",
+      }),
+    ).toBe("Read file");
   });
 });
 

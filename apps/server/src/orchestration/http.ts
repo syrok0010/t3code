@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { respondToAuthError } from "../auth/http.ts";
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
@@ -58,6 +59,7 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
       status: 200,
     });
   }).pipe(
+    Effect.catchTag("AuthError", respondToAuthError),
     Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
     Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError),
   ),
@@ -89,5 +91,8 @@ export const orchestrationDispatchRouteLayer = HttpRouter.add(
       ),
     );
     return HttpServerResponse.jsonUnsafe(result, { status: 200 });
-  }).pipe(Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError)),
+  }).pipe(
+    Effect.catchTag("AuthError", respondToAuthError),
+    Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
+  ),
 );

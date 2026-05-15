@@ -480,6 +480,7 @@ describe("resolveThreadStatusPill", () => {
     interactionMode: "plan" as const,
     latestTurn: null,
     lastVisitedAt: undefined,
+    updatedAt: "2026-03-09T10:05:00.000Z",
     session: {
       provider: ProviderDriverKind.make("codex"),
       status: "running" as const,
@@ -554,21 +555,22 @@ describe("resolveThreadStatusPill", () => {
   });
 
   it("shows completed when there is an unseen completion and no active blocker", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          lastVisitedAt: "2026-03-09T10:04:00.000Z",
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
-          },
+    const status = resolveThreadStatusPill({
+      thread: {
+        ...baseThread,
+        interactionMode: "default",
+        latestTurn: makeLatestTurn(),
+        lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        session: {
+          ...baseThread.session,
+          status: "ready",
+          orchestrationStatus: "ready",
         },
-      }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+      },
+    });
+
+    expect(status).toMatchObject({ label: "Completed", pulse: false });
+    expect(status).not.toHaveProperty("workingProvider");
   });
 });
 

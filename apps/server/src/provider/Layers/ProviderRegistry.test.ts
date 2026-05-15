@@ -1352,6 +1352,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "gemini",
                 "opencode",
               ]);
               assert.strictEqual(cursorProvider?.enabled, false);

@@ -8,7 +8,11 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  createModelCapabilities,
+  geminiCapabilitiesForModel,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -80,10 +84,15 @@ export function resolveSelectableProvider(
 export function getProviderModelCapabilities(
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
-  provider: ProviderDriverKind,
+  provider: ProviderDriverKind | string,
 ): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  return models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
+  const driver = typeof provider === "string" ? ProviderDriverKind.make(provider) : provider;
+  const slug = normalizeModelSlug(model, driver);
+  const discovered = models.find((candidate) => candidate.slug === slug)?.capabilities;
+  if (driver === ProviderDriverKind.make("gemini")) {
+    return geminiCapabilitiesForModel(slug, discovered ?? EMPTY_CAPABILITIES);
+  }
+  return discovered ?? EMPTY_CAPABILITIES;
 }
 
 export function getDefaultServerModel(

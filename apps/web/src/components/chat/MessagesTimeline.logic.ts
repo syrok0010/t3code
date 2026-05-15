@@ -68,6 +68,33 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
+function capitalizePhrase(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return value;
+  }
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function isGenericCommandHeading(value: string): boolean {
+  const normalized = normalizeCompactToolLabel(value).toLowerCase();
+  return normalized === "ran command" || normalized === "terminal" || normalized === "tool call";
+}
+
+export function resolveCompactWorkEntryHeading(
+  workEntry: Pick<WorkLogEntry, "command" | "itemType" | "label" | "requestKind" | "toolTitle">,
+): string {
+  const heading = workEntry.toolTitle ?? workEntry.label;
+  if (
+    workEntry.command &&
+    isGenericCommandHeading(heading) &&
+    (workEntry.itemType === "command_execution" || workEntry.requestKind === "command")
+  ) {
+    return workEntry.command;
+  }
+  return capitalizePhrase(normalizeCompactToolLabel(heading));
+}
+
 export function resolveAssistantMessageCopyState({
   text,
   showCopyButton,

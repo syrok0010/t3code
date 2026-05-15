@@ -213,6 +213,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CLAUDE_INSTANCE_ID = ProviderInstanceId.make("claudeAgent");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+const GEMINI_INSTANCE_ID = ProviderInstanceId.make("gemini");
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   return {
@@ -235,6 +236,23 @@ function buildOpenCodeProvider(models: ServerProvider["models"]): ServerProvider
   return {
     driver: ProviderDriverKind.make("opencode"),
     instanceId: ProviderInstanceId.make("opencode"),
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: new Date().toISOString(),
+    models,
+    slashCommands: [],
+    skills: [],
+  };
+}
+
+function buildGeminiProvider(models: ServerProvider["models"]): ServerProvider {
+  return {
+    driver: ProviderDriverKind.make("gemini"),
+    instanceId: GEMINI_INSTANCE_ID,
+    displayName: "Gemini",
     enabled: true,
     installed: true,
     version: "1.0.0",
@@ -366,6 +384,44 @@ describe("ProviderModelPicker", () => {
           "codex",
           "claudeAgent",
         ]);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses the real Gemini sidebar item instead of the coming-soon placeholder", async () => {
+    const providers: ReadonlyArray<ServerProvider> = [
+      ...TEST_PROVIDERS,
+      buildGeminiProvider([
+        {
+          slug: "gemini-2.5-pro",
+          name: "Gemini 2.5 Pro",
+          isCustom: false,
+          capabilities: createModelCapabilities({ optionDescriptors: [] }),
+        },
+      ]),
+    ];
+    const mounted = await mountPicker({
+      activeInstanceId: GEMINI_INSTANCE_ID,
+      model: "gemini-2.5-pro",
+      lockedProvider: null,
+      providers,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const order = getSidebarProviderOrder();
+        expect(order).toContain("gemini");
+        expect(order).not.toContain("gemini-coming-soon");
+
+        const geminiButton = document.querySelector<HTMLElement>(
+          '[data-model-picker-provider="gemini"]',
+        );
+        expect(geminiButton?.querySelector("svg")).not.toBeNull();
+        expect(geminiButton?.textContent?.trim()).not.toBe("GE");
       });
     } finally {
       await mounted.cleanup();

@@ -1,7 +1,11 @@
 import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
+  GEMINI_THINKING_BUDGET_OPTIONS,
+  GEMINI_THINKING_LEVEL_OPTIONS,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
+  type GeminiThinkingBudget,
+  type GeminiThinkingLevel,
   type ModelCapabilities,
   type ModelSelection,
   ProviderDriverKind,
@@ -16,6 +20,23 @@ export interface SelectableModelOption {
   slug: string;
   name: string;
 }
+
+export interface GeminiModelOptions {
+  readonly thinkingLevel?: GeminiThinkingLevel;
+  readonly thinkingBudget?: GeminiThinkingBudget;
+}
+
+export type GeminiThinkingConfigKind = "budget" | "level";
+
+const GEMINI_THINKING_OPTION_ID = "thinking";
+const GEMINI_3_MODEL_PATTERN = /^(?:auto-)?gemini-3(?:[.-]|$)/i;
+const GEMINI_2_5_MODEL_PATTERN = /^(?:auto-)?gemini-2\.5(?:[.-]|$)/i;
+const GEMINI_THINKING_LEVEL_SET = new Set<GeminiThinkingLevel>(["LOW", "HIGH"]);
+const GEMINI_THINKING_BUDGET_MAP = new Map<string, GeminiThinkingBudget>([
+  ["-1", -1],
+  ["0", 0],
+  ["512", 512],
+]);
 
 export function createModelCapabilities(input: {
   optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
@@ -114,6 +135,244 @@ function cloneDescriptor(descriptor: ProviderOptionDescriptor): ProviderOptionDe
 
 function cloneSelection(selection: ProviderOptionSelection): ProviderOptionSelection {
   return { ...selection };
+}
+
+function isGeminiThinkingLevel(value: string): value is GeminiThinkingLevel {
+  return GEMINI_THINKING_LEVEL_SET.has(value as GeminiThinkingLevel);
+}
+
+function isGeminiThinkingBudget(value: string): value is `${GeminiThinkingBudget}` {
+  return GEMINI_THINKING_BUDGET_MAP.has(value);
+}
+
+function sanitizeGeminiAliasSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "model";
+}
+
+function readGeminiLegacySelectionValue(
+  modelOptions: GeminiModelOptions | null | undefined,
+): string | null {
+  const candidates = [
+    trimOrNull(modelOptions?.thinkingLevel),
+    modelOptions?.thinkingBudget !== undefined ? String(modelOptions.thinkingBudget) : null,
+  ];
+  return candidates.find((candidate): candidate is string => candidate !== null) ?? null;
+}
+
+function readGeminiThinkingCandidates(
+  input: ReadonlyArray<ProviderOptionSelection> | GeminiModelOptions | null | undefined,
+): ReadonlyArray<string | null> {
+  if (Array.isArray(input)) {
+    return [trimOrNull(getProviderOptionStringSelectionValue(input, GEMINI_THINKING_OPTION_ID))];
+  }
+  return [readGeminiLegacySelectionValue(input as GeminiModelOptions | null | undefined)];
+}
+
+export const EMPTY_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [],
+});
+
+export const DEFAULT_GEMINI_MODEL_CAPABILITIES: ModelCapabilities = EMPTY_MODEL_CAPABILITIES;
+
+export const GEMINI_3_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: GEMINI_THINKING_OPTION_ID,
+      label: "Thinking",
+      type: "select",
+      options: [
+        { id: "HIGH", label: "High", isDefault: true },
+        { id: "LOW", label: "Low" },
+      ],
+      currentValue: "HIGH",
+    },
+  ],
+});
+
+export const GEMINI_2_5_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: GEMINI_THINKING_OPTION_ID,
+      label: "Thinking",
+      type: "select",
+      options: [
+        { id: "-1", label: "Dynamic", isDefault: true },
+        { id: "512", label: "512 Tokens" },
+      ],
+      currentValue: "-1",
+    },
+  ],
+});
+
+export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean {
+  return (caps.optionDescriptors ?? []).some(
+    (descriptor) =>
+      descriptor.type === "select" && descriptor.options.some((option) => option.id === value),
+  );
+}
+
+export function getGeminiThinkingConfigKind(
+  model: string | null | undefined,
+): GeminiThinkingConfigKind | null {
+  const trimmed = trimOrNull(model);
+  if (!trimmed) {
+    return null;
+  }
+  if (GEMINI_3_MODEL_PATTERN.test(trimmed)) {
+    return "level";
+  }
+  if (GEMINI_2_5_MODEL_PATTERN.test(trimmed)) {
+    return "budget";
+  }
+  return null;
+}
+
+export function geminiCapabilitiesForModel(
+  modelId: string | null | undefined,
+  fallbackCapabilities: ModelCapabilities = DEFAULT_GEMINI_MODEL_CAPABILITIES,
+): ModelCapabilities {
+  switch (getGeminiThinkingConfigKind(modelId)) {
+    case "level":
+      return GEMINI_3_MODEL_CAPABILITIES;
+    case "budget":
+      return GEMINI_2_5_MODEL_CAPABILITIES;
+    default:
+      return fallbackCapabilities;
+  }
+}
+
+export function getGeminiThinkingSelectionValue(
+  caps: ModelCapabilities,
+  input: ReadonlyArray<ProviderOptionSelection> | GeminiModelOptions | null | undefined,
+): string | null {
+  const candidates = readGeminiThinkingCandidates(input);
+  return (
+    candidates.find(
+      (candidate): candidate is string => !!candidate && hasEffortLevel(caps, candidate),
+    ) ??
+    candidates.find((candidate): candidate is string => !!candidate) ??
+    null
+  );
+}
+
+export function geminiModelOptionsFromEffortValue(
+  value: string | null | undefined,
+): GeminiModelOptions | undefined {
+  const trimmed = trimOrNull(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  if (isGeminiThinkingLevel(trimmed)) {
+    return { thinkingLevel: trimmed };
+  }
+  if (isGeminiThinkingBudget(trimmed)) {
+    return {
+      thinkingBudget: GEMINI_THINKING_BUDGET_MAP.get(trimmed) as GeminiThinkingBudget,
+    };
+  }
+  return undefined;
+}
+
+export function getGeminiThinkingModelAlias(
+  model: string,
+  input: string | ReadonlyArray<ProviderOptionSelection> | GeminiModelOptions | null | undefined,
+): string | null {
+  const kind = getGeminiThinkingConfigKind(model);
+  if (!kind) {
+    return null;
+  }
+
+  const caps = geminiCapabilitiesForModel(model);
+  const effort =
+    typeof input === "string" ? trimOrNull(input) : getGeminiThinkingSelectionValue(caps, input);
+  if (!effort || !hasEffortLevel(caps, effort)) {
+    return null;
+  }
+
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return null;
+  }
+
+  const base = sanitizeGeminiAliasSegment(model);
+  if (kind === "level" && nextOptions.thinkingLevel) {
+    return `t3code-gemini-${base}-thinking-level-${nextOptions.thinkingLevel.toLowerCase()}`;
+  }
+  if (kind === "budget" && nextOptions.thinkingBudget !== undefined) {
+    const budget =
+      nextOptions.thinkingBudget === -1 ? "dynamic" : String(nextOptions.thinkingBudget);
+    return `t3code-gemini-${base}-thinking-budget-${budget}`;
+  }
+  return null;
+}
+
+export function resolveGeminiApiModelId(
+  model: string,
+  input: ReadonlyArray<ProviderOptionSelection> | GeminiModelOptions | null | undefined,
+): string {
+  return getGeminiThinkingModelAlias(model, input) ?? model;
+}
+
+export function buildGeminiThinkingModelConfigAliases(
+  modelIds: ReadonlyArray<string>,
+): Record<string, Record<string, unknown>> {
+  const aliases: Record<string, Record<string, unknown>> = {};
+  const seen = new Set<string>();
+
+  for (const modelId of modelIds) {
+    const model = modelId.trim();
+    if (!model || seen.has(model)) {
+      continue;
+    }
+    seen.add(model);
+    const caps = geminiCapabilitiesForModel(model);
+
+    switch (getGeminiThinkingConfigKind(model)) {
+      case "level":
+        for (const thinkingLevel of GEMINI_THINKING_LEVEL_OPTIONS) {
+          if (!hasEffortLevel(caps, thinkingLevel)) {
+            continue;
+          }
+          const alias = getGeminiThinkingModelAlias(model, { thinkingLevel });
+          if (alias) {
+            aliases[alias] = {
+              extends: "chat-base-3",
+              modelConfig: {
+                model,
+                generateContentConfig: { thinkingConfig: { thinkingLevel } },
+              },
+            };
+          }
+        }
+        break;
+      case "budget":
+        for (const thinkingBudget of GEMINI_THINKING_BUDGET_OPTIONS) {
+          if (!hasEffortLevel(caps, String(thinkingBudget))) {
+            continue;
+          }
+          const alias = getGeminiThinkingModelAlias(model, { thinkingBudget });
+          if (alias) {
+            aliases[alias] = {
+              extends: "chat-base-2.5",
+              modelConfig: {
+                model,
+                generateContentConfig: { thinkingConfig: { thinkingBudget } },
+              },
+            };
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return aliases;
 }
 
 function withDescriptorCurrentValue(
@@ -314,13 +573,15 @@ function cloneSelections(
 }
 
 export function createModelSelection(
-  instanceId: ProviderInstanceId,
+  instanceId: ProviderInstanceId | string,
   model: string,
   options?: ReadonlyArray<ProviderOptionSelection> | null,
 ): ModelSelection {
   const selections = options ? cloneSelections(options) : [];
+  const normalizedInstanceId =
+    typeof instanceId === "string" ? ProviderInstanceId.make(instanceId) : instanceId;
   const base: ModelSelection = {
-    instanceId,
+    instanceId: normalizedInstanceId,
     model,
   };
   return selections.length > 0 ? { ...base, options: selections } : base;
@@ -347,6 +608,18 @@ export function resolvePromptInjectedEffort(
     }
   }
   return null;
+}
+
+export function resolveApiModelId(modelSelection: ModelSelection): string {
+  if (modelSelection.instanceId === ProviderInstanceId.make("claudeAgent")) {
+    return getModelSelectionStringOptionValue(modelSelection, "contextWindow") === "1m"
+      ? `${modelSelection.model}[1m]`
+      : modelSelection.model;
+  }
+  if (modelSelection.instanceId === ProviderInstanceId.make("gemini")) {
+    return resolveGeminiApiModelId(modelSelection.model, modelSelection.options);
+  }
+  return modelSelection.model;
 }
 
 export function applyClaudePromptEffortPrefix(
