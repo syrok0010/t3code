@@ -12,6 +12,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
@@ -22,11 +23,11 @@ import {
   layer,
 } from "./AccountLimitsService.ts";
 
-const makeTestLayer = (settings: Partial<ServerSettingsContract> = {}) =>
+const makeTestLayer = (settings: Partial<ServerSettingsContract> = {}, baseDir?: string) =>
   layer.pipe(
     Layer.provide(ServerSettings.layerTest(settings)),
     Layer.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-account-limits-test-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), baseDir ?? { prefix: "t3-account-limits-test-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     ),
@@ -38,6 +39,23 @@ const codexRateLimits = (usedPercent: number) => ({
   primary: { used_percent: usedPercent, window_minutes: 10_080 },
   plan_type: "plus",
 });
+const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const makeTempDirectory = (prefix: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), prefix))),
+    (directory) => Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true })),
+  );
+const writeCodexTranscript = (home: string, usedPercent: number, timestamp: string) => {
+  const sessionsDir = NodePath.join(home, "sessions", "2026", "08", "09");
+  NodeFS.mkdirSync(sessionsDir, { recursive: true });
+  NodeFS.writeFileSync(
+    NodePath.join(sessionsDir, "rollout.jsonl"),
+    `${encodeUnknownJson({
+      timestamp,
+      payload: { rate_limits: codexRateLimits(usedPercent) },
+    })}\n`,
+  );
+};
 
 describe("AccountLimitsService", () => {
   it("derives every configured Codex instance for transcript recovery", () => {
@@ -89,27 +107,17 @@ describe("AccountLimitsService", () => {
     }).pipe(Effect.provide(makeTestLayer())),
   );
 
-  it.effect("recovers independent transcript snapshots from two configured Codex homes", () => {
-    let root = "";
-    return Effect.gen(function* () {
-      const settings = yield* Effect.sync(() => {
-        root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-account-homes-"));
+  it.effect("recovers independent transcript snapshots from two configured Codex homes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* makeTempDirectory("t3-account-homes-");
         const personalHome = NodePath.join(root, "personal");
         const workHome = NodePath.join(root, "work");
-        const writeTranscript = (home: string, usedPercent: number, timestamp: string) => {
-          const sessionsDir = NodePath.join(home, "sessions", "2026", "08", "09");
-          NodeFS.mkdirSync(sessionsDir, { recursive: true });
-          NodeFS.writeFileSync(
-            NodePath.join(sessionsDir, "rollout.jsonl"),
-            `${JSON.stringify({
-              timestamp,
-              payload: { rate_limits: codexRateLimits(usedPercent) },
-            })}\n`,
-          );
-        };
-        writeTranscript(personalHome, 20, "2026-08-09T11:59:00.000Z");
-        writeTranscript(workHome, 80, "2026-08-09T11:58:00.000Z");
-        return {
+        yield* Effect.sync(() => {
+          writeCodexTranscript(personalHome, 20, "2026-08-09T11:59:00.000Z");
+          writeCodexTranscript(workHome, 80, "2026-08-09T11:58:00.000Z");
+        });
+        const settings = {
           providers: { codex: { enabled: false } },
           providerInstances: {
             codex_personal: {
@@ -124,29 +132,113 @@ describe("AccountLimitsService", () => {
             },
           },
         } as unknown as Partial<ServerSettingsContract>;
-      });
-      const summary = yield* Effect.gen(function* () {
-        yield* TestClock.adjust("2 minutes");
-        const service = yield* AccountLimitsService;
-        return yield* service.readSummary();
-      }).pipe(Effect.provide(makeTestLayer(settings)));
+        const summary = yield* Effect.gen(function* () {
+          yield* TestClock.adjust("2 minutes");
+          const service = yield* AccountLimitsService;
+          return yield* service.readSummary();
+        }).pipe(Effect.provide(makeTestLayer(settings)));
 
-      expect(
-        summary.snapshots.map((snapshot) => [
-          snapshot.providerInstanceId,
-          snapshot.windows[0]?.usedPercent,
-          snapshot.source,
-        ]),
-      ).toEqual([
-        ["codex_personal", 20, "transcript"],
-        ["codex_work", 80, "transcript"],
-      ]);
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          if (root !== "") NodeFS.rmSync(root, { recursive: true, force: true });
-        }),
-      ),
-    );
-  });
+        expect(
+          summary.snapshots.map((snapshot) => [
+            snapshot.providerInstanceId,
+            snapshot.windows[0]?.usedPercent,
+            snapshot.source,
+          ]),
+        ).toEqual([
+          ["codex_personal", 20, "transcript"],
+          ["codex_work", 80, "transcript"],
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("does not copy a shared transcript snapshot across shadow-home accounts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* makeTempDirectory("t3-account-shadows-");
+        const fixture = yield* Effect.sync(() => {
+          const sharedHome = NodePath.join(root, "shared");
+          const baseDir = NodePath.join(root, "state");
+          const stateDir = NodePath.join(baseDir, "userdata");
+          NodeFS.mkdirSync(stateDir, { recursive: true });
+          writeCodexTranscript(sharedHome, 2, "2026-08-09T11:59:00.000Z");
+          NodeFS.writeFileSync(
+            NodePath.join(stateDir, "account-limits.json"),
+            encodeUnknownJson([
+              {
+                provider: "codex",
+                providerInstanceId: "codex_personal",
+                plan: "plus",
+                windows: [
+                  {
+                    id: "seven_day",
+                    label: "Week",
+                    usedPercent: 2,
+                    resetsAt: null,
+                    windowMinutes: 10_080,
+                  },
+                ],
+                asOf: "2026-08-09T11:59:00.000Z",
+                source: "transcript",
+              },
+              {
+                provider: "codex",
+                providerInstanceId: "codex_work",
+                plan: "plus",
+                windows: [
+                  {
+                    id: "seven_day",
+                    label: "Week",
+                    usedPercent: 77,
+                    resetsAt: null,
+                    windowMinutes: 10_080,
+                  },
+                ],
+                asOf: "2026-08-09T12:00:00.000Z",
+                source: "live",
+              },
+            ]),
+          );
+          return {
+            baseDir,
+            settings: {
+              providers: { codex: { enabled: false } },
+              providerInstances: {
+                codex_personal: {
+                  driver: "codex",
+                  enabled: true,
+                  config: {
+                    homePath: sharedHome,
+                    shadowHomePath: NodePath.join(root, "personal-shadow"),
+                  },
+                },
+                codex_work: {
+                  driver: "codex",
+                  enabled: true,
+                  config: {
+                    homePath: sharedHome,
+                    shadowHomePath: NodePath.join(root, "work-shadow"),
+                  },
+                },
+              },
+            } as unknown as Partial<ServerSettingsContract>,
+          };
+        });
+
+        const summary = yield* Effect.gen(function* () {
+          yield* TestClock.adjust("2 minutes");
+          const service = yield* AccountLimitsService;
+          return yield* service.readSummary();
+        }).pipe(Effect.provide(makeTestLayer(fixture.settings, fixture.baseDir)));
+
+        expect(
+          summary.snapshots.map((snapshot) => [
+            snapshot.providerInstanceId,
+            snapshot.windows[0]?.usedPercent,
+            snapshot.source,
+          ]),
+        ).toEqual([["codex_work", 77, "live"]]);
+      }),
+    ),
+  );
 });

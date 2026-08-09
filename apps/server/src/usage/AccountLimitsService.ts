@@ -271,12 +271,12 @@ export const make = Effect.gen(function* () {
     );
     if (settings === null) return;
     const instanceConfigs = deriveCodexLimitInstanceConfigs(settings);
+    const targets: Array<{
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly sessionsDir: string;
+    }> = [];
     for (const [providerInstanceId, instance] of instanceConfigs) {
       if (instance.enabled === false) continue;
-      const lastAttemptAtMs = lastCodexSeedAttemptAtMs.get(providerInstanceId) ?? 0;
-      if (nowMs - lastAttemptAtMs < CODEX_SEED_MIN_INTERVAL_MS) continue;
-      lastCodexSeedAttemptAtMs.set(providerInstanceId, nowMs);
-
       const codexSettings = yield* decodeCodexSettings(instance.config ?? {}).pipe(
         Effect.catchCause(() => Effect.succeed(null)),
       );
@@ -285,8 +285,52 @@ export const make = Effect.gen(function* () {
         ...codexSettings,
         enabled: instance.enabled ?? codexSettings.enabled,
       }).pipe(Effect.provideService(Path.Path, path));
-      const sessionsDir = path.join(layout.sharedHomePath, "sessions");
-      const found = yield* Effect.promise(() => readLatestCodexRateLimits(sessionsDir, nowMs));
+      targets.push({
+        providerInstanceId,
+        sessionsDir: path.join(layout.sharedHomePath, "sessions"),
+      });
+    }
+
+    const sessionsDirCounts = new Map<string, number>();
+    for (const target of targets) {
+      sessionsDirCounts.set(
+        target.sessionsDir,
+        (sessionsDirCounts.get(target.sessionsDir) ?? 0) + 1,
+      );
+    }
+
+    // Shadow homes intentionally share transcripts with their common
+    // CODEX_HOME. Transcript rate-limit records carry no account/instance
+    // identity, so assigning the newest shared record to every shadow account
+    // fabricates identical usage. Drop any old transcript-derived copies and
+    // wait for an instance-tagged live event instead. Live snapshots remain
+    // valid and are preserved across restarts by the cache.
+    const ambiguousTargets = targets.filter(
+      (target) => (sessionsDirCounts.get(target.sessionsDir) ?? 0) > 1,
+    );
+    if (ambiguousTargets.length > 0) {
+      yield* stateLock.withPermits(1)(
+        Effect.gen(function* () {
+          let changed = false;
+          for (const target of ambiguousTargets) {
+            if (snapshots.get(target.providerInstanceId)?.source !== "transcript") continue;
+            snapshots.delete(target.providerInstanceId);
+            changed = true;
+          }
+          if (changed) yield* persist();
+        }),
+      );
+    }
+
+    for (const target of targets) {
+      if ((sessionsDirCounts.get(target.sessionsDir) ?? 0) > 1) continue;
+      const lastAttemptAtMs = lastCodexSeedAttemptAtMs.get(target.providerInstanceId) ?? 0;
+      if (nowMs - lastAttemptAtMs < CODEX_SEED_MIN_INTERVAL_MS) continue;
+      lastCodexSeedAttemptAtMs.set(target.providerInstanceId, nowMs);
+
+      const found = yield* Effect.promise(() =>
+        readLatestCodexRateLimits(target.sessionsDir, nowMs),
+      );
       if (found === null) continue;
 
       const asOf = DateTime.formatIso(DateTime.makeUnsafe(found.asOfMs));
@@ -294,12 +338,12 @@ export const make = Effect.gen(function* () {
       // guard-and-store is serialized against live ingests.
       yield* stateLock.withPermits(1)(
         Effect.gen(function* () {
-          const existing = snapshots.get(providerInstanceId);
+          const existing = snapshots.get(target.providerInstanceId);
           // ISO-8601 strings order lexicographically.
           if (existing !== undefined && existing.asOf >= asOf) return;
           yield* store({
             provider: "codex",
-            providerInstanceId,
+            providerInstanceId: target.providerInstanceId,
             plan: found.snapshot.plan ?? existing?.plan ?? null,
             windows: found.snapshot.windows,
             asOf,

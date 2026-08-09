@@ -20,6 +20,22 @@ for multiple configured accounts:
   provider instance display name;
 - the Usage page and hover card render one set of meters per instance.
 
+### Shared CODEX_HOME and shadow accounts
+
+Several Codex instances may use one shared `homePath` and separate
+`shadowHomePath` values. Their `sessions` directory is shared, and Codex
+transcript rate-limit records do not identify the account that produced them.
+The local patch therefore does not use transcript fallback for any group of
+instances resolving to the same sessions directory; copying the newest shared
+record would incorrectly show identical usage for every account.
+
+On first start after this fix, cached transcript-derived copies for such a
+group are removed automatically. Each instance initially shows `No limit data
+yet` until it emits its own tagged live rate-limit event (normally after its
+app-server/session starts). Live snapshots remain separate by instance and are
+persisted across restarts. Instances with genuinely separate `homePath`
+directories still recover independently from their own transcripts.
+
 Keep this change as one local commit so it can be cherry-picked onto a refreshed
 PR or onto `main` after the upstream PR merges.
 
