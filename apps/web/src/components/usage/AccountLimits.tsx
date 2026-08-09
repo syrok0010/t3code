@@ -14,7 +14,7 @@ import type { AccountLimitsSnapshot, AccountLimitsWindow } from "@t3tools/contra
 import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
-import { useAccountLimits } from "../../state/accountLimits";
+import { useAccountLimits, type AccountLimitsSnapshotView } from "../../state/accountLimits";
 import { formatAgo, formatResetAt } from "@t3tools/shared/limitsFormat";
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
@@ -63,6 +63,151 @@ function SnapshotAge({ snapshot, nowMs }: { snapshot: AccountLimitsSnapshot; now
   );
 }
 
+function entriesForProvider(
+  snapshots: ReadonlyArray<AccountLimitsSnapshotView>,
+  provider: AccountLimitsSnapshot["provider"],
+): ReadonlyArray<AccountLimitsSnapshotView> {
+  return snapshots.filter((entry) => entry.snapshot.provider === provider);
+}
+
+function snapshotViewKey(entry: AccountLimitsSnapshotView): string {
+  return `${entry.environmentId}:${entry.snapshot.providerInstanceId}`;
+}
+
+function snapshotProviderLabel(entry: AccountLimitsSnapshotView): string {
+  const providerLabel = PROVIDER_LABEL[entry.snapshot.provider];
+  const instanceLabel = entry.displayName;
+  return instanceLabel === entry.snapshot.provider || instanceLabel === providerLabel
+    ? providerLabel
+    : `${providerLabel} · ${instanceLabel}`;
+}
+
+type LimitsVariant = "compact" | "full";
+
+function ProviderLimitsGroup({
+  provider,
+  entry,
+  isSettling,
+  nowMs,
+  variant,
+}: {
+  provider: AccountLimitsSnapshot["provider"];
+  entry: AccountLimitsSnapshotView | null;
+  isSettling: boolean;
+  nowMs: number;
+  variant: LimitsVariant;
+}) {
+  const Mark = PROVIDER_MARK[provider];
+  const compact = variant === "compact";
+  if (entry === null) {
+    return (
+      <div className={cn("flex flex-col", compact ? "gap-1" : "gap-1.5")}>
+        <div className={cn("flex items-baseline", compact ? "gap-1.5" : "gap-2")}>
+          <Mark className={cn("shrink-0 self-center", compact ? "size-3" : "size-3.5")} />
+          <span className={cn("font-medium text-foreground", compact ? "text-xs" : "text-sm")}>
+            {PROVIDER_LABEL[provider]}
+          </span>
+        </div>
+        <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>
+          {isSettling ? "Loading…" : "No limit data yet"}
+        </p>
+      </div>
+    );
+  }
+
+  const snapshot = entry.snapshot;
+  return (
+    <div className={cn("flex flex-col", compact ? "gap-1" : "gap-1.5")}>
+      <div className={cn("flex items-baseline", compact ? "gap-1.5" : "gap-2")}>
+        <Mark className={cn("shrink-0 self-center", compact ? "size-3" : "size-3.5")} />
+        <span className={cn("font-medium text-foreground", compact ? "text-xs" : "text-sm")}>
+          {snapshotProviderLabel(entry)}
+        </span>
+        <span className="ml-auto">
+          <SnapshotAge snapshot={snapshot} nowMs={nowMs} />
+        </span>
+      </div>
+      {snapshot.windows.length === 0 ? (
+        <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>
+          No limit data yet
+        </p>
+      ) : (
+        snapshot.windows.map((window) => {
+          const resetAt = formatResetAt(window.resetsAt, nowMs);
+          return (
+            <div key={window.id} className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+              <span
+                className={cn(
+                  "shrink-0 text-muted-foreground",
+                  compact ? "w-9 text-[10px]" : "w-10 text-xs",
+                )}
+              >
+                {window.label}
+              </span>
+              <LimitMeter window={window} color={PROVIDER_COLOR[provider]} />
+              <span
+                className={cn(
+                  "shrink-0 whitespace-nowrap text-right tabular-nums text-foreground",
+                  compact ? "text-[11px]" : "text-xs font-medium",
+                  usageTone(window.usedPercent),
+                )}
+              >
+                {Math.round(window.usedPercent)}% used
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 whitespace-nowrap text-right tabular-nums text-muted-foreground",
+                  compact ? "text-[10px]" : "text-xs",
+                )}
+              >
+                {resetAt === null ? "" : compact ? resetAt : `resets ${resetAt}`}
+              </span>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function ProviderLimitsGroups({
+  snapshots,
+  isSettling,
+  nowMs,
+  variant,
+}: {
+  snapshots: ReadonlyArray<AccountLimitsSnapshotView>;
+  isSettling: boolean;
+  nowMs: number;
+  variant: LimitsVariant;
+}) {
+  return PROVIDER_ORDER.flatMap((provider) => {
+    const entries = entriesForProvider(snapshots, provider);
+    if (entries.length === 0) {
+      return [
+        <ProviderLimitsGroup
+          key={provider}
+          provider={provider}
+          entry={null}
+          isSettling={isSettling}
+          nowMs={nowMs}
+          variant={variant}
+        />,
+      ];
+    }
+    return entries.map((entry) => (
+      <ProviderLimitsGroup
+        key={snapshotViewKey(entry)}
+        provider={provider}
+        entry={entry}
+        isSettling={isSettling}
+        nowMs={nowMs}
+        variant={variant}
+      />
+    ));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Sidebar hover card
 // ---------------------------------------------------------------------------
@@ -72,54 +217,18 @@ export function AccountLimitsHoverCard() {
   const { snapshots, isPending, isSettling } = useAccountLimits();
   const nowMs = useNowMs();
 
-  if (isPending && snapshots.size === 0) {
+  if (isPending && snapshots.length === 0) {
     return <p className="px-1 py-2 text-xs text-muted-foreground">Loading limits…</p>;
   }
 
   return (
     <div className="flex w-64 flex-col gap-2.5 p-1.5">
-      {PROVIDER_ORDER.map((provider) => {
-        const snapshot = snapshots.get(provider);
-        const Mark = PROVIDER_MARK[provider];
-        return (
-          <div key={provider} className="flex flex-col gap-1">
-            <div className="flex items-baseline gap-1.5">
-              <Mark className="size-3 shrink-0 self-center" />
-              <span className="text-xs font-medium text-foreground">
-                {PROVIDER_LABEL[provider]}
-              </span>
-              <span className="ml-auto">
-                {snapshot !== undefined ? <SnapshotAge snapshot={snapshot} nowMs={nowMs} /> : null}
-              </span>
-            </div>
-            {snapshot === undefined || snapshot.windows.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">
-                {snapshot === undefined && isSettling ? "Loading…" : "No limit data yet"}
-              </p>
-            ) : (
-              snapshot.windows.map((window) => (
-                <div key={window.id} className="flex items-center gap-2">
-                  <span className="w-9 shrink-0 text-[10px] text-muted-foreground">
-                    {window.label}
-                  </span>
-                  <LimitMeter window={window} color={PROVIDER_COLOR[provider]} />
-                  <span
-                    className={cn(
-                      "shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-foreground",
-                      usageTone(window.usedPercent),
-                    )}
-                  >
-                    {Math.round(window.usedPercent)}% used
-                  </span>
-                  <span className="shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-muted-foreground">
-                    {formatResetAt(window.resetsAt, nowMs) ?? ""}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        );
-      })}
+      <ProviderLimitsGroups
+        snapshots={snapshots}
+        isSettling={isSettling}
+        nowMs={nowMs}
+        variant="compact"
+      />
     </div>
   );
 }
@@ -137,53 +246,12 @@ export function AccountLimitsSection() {
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-medium text-foreground">Limits</h2>
       <div className="grid gap-x-12 gap-y-4 sm:grid-cols-2">
-        {PROVIDER_ORDER.map((provider) => {
-          const snapshot = snapshots.get(provider);
-          const Mark = PROVIDER_MARK[provider];
-          return (
-            <div key={provider} className="flex flex-col gap-1.5">
-              <div className="flex items-baseline gap-2">
-                <Mark className="size-3.5 shrink-0 self-center" />
-                <span className="text-sm font-medium text-foreground">
-                  {PROVIDER_LABEL[provider]}
-                </span>
-                <span className="ml-auto">
-                  {snapshot !== undefined ? (
-                    <SnapshotAge snapshot={snapshot} nowMs={nowMs} />
-                  ) : null}
-                </span>
-              </div>
-              {snapshot === undefined || snapshot.windows.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {snapshot === undefined && isSettling ? "Loading…" : "No limit data yet"}
-                </p>
-              ) : (
-                snapshot.windows.map((window) => {
-                  const resetAt = formatResetAt(window.resetsAt, nowMs);
-                  return (
-                    <div key={window.id} className="flex items-center gap-3">
-                      <span className="w-10 shrink-0 text-xs text-muted-foreground">
-                        {window.label}
-                      </span>
-                      <LimitMeter window={window} color={PROVIDER_COLOR[provider]} />
-                      <span
-                        className={cn(
-                          "shrink-0 whitespace-nowrap text-right text-xs font-medium tabular-nums text-foreground",
-                          usageTone(window.usedPercent),
-                        )}
-                      >
-                        {Math.round(window.usedPercent)}% used
-                      </span>
-                      <span className="shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
-                        {resetAt === null ? "" : `resets ${resetAt}`}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          );
-        })}
+        <ProviderLimitsGroups
+          snapshots={snapshots}
+          isSettling={isSettling}
+          nowMs={nowMs}
+          variant="full"
+        />
       </div>
     </section>
   );

@@ -9,6 +9,7 @@ import {
   CheckpointRef,
   classifyTaskAgentKind,
   EventId,
+  defaultInstanceIdForDriver,
   isToolLifecycleItemType,
   ThreadId,
   type ThreadTokenUsageSnapshot,
@@ -1482,6 +1483,8 @@ const make = Effect.gen(function* () {
       if (event.type === "account.rate-limits.updated") {
         yield* accountLimits.ingest({
           provider: event.provider,
+          providerInstanceId:
+            event.providerInstanceId ?? defaultInstanceIdForDriver(event.provider),
           payload: event.payload.rateLimits,
           createdAt: event.createdAt,
         });

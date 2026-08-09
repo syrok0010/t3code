@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
+  ACCOUNT_LIMITS_CONTRACT_VERSION,
   ApprovalRequestId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -222,7 +223,10 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>;
+    onAccountLimitsIngest?: (input: AccountLimitsService.AccountLimitsIngestInput) => void;
+  }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -238,6 +242,21 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const accountLimitsLayer =
+      options?.onAccountLimitsIngest === undefined
+        ? AccountLimitsService.layerTest
+        : Layer.succeed(
+            AccountLimitsService.AccountLimitsService,
+            AccountLimitsService.AccountLimitsService.of({
+              readSummary: () =>
+                Effect.succeed({
+                  contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,
+                  readAt: "1970-01-01T00:00:00.000Z",
+                  snapshots: [],
+                }),
+              ingest: (input) => Effect.sync(() => options.onAccountLimitsIngest?.(input)),
+            }),
+          );
     const layer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
@@ -247,7 +266,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ThreadPlanProgress.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
-      Layer.provideMerge(AccountLimitsService.layerTest),
+      Layer.provideMerge(accountLimitsLayer),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
@@ -323,6 +342,33 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
     };
   }
+
+  it("forwards provider instance identity with account-limit events", async () => {
+    const ingested: AccountLimitsService.AccountLimitsIngestInput[] = [];
+    const harness = await createHarness({
+      onAccountLimitsIngest: (input) => ingested.push(input),
+    });
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-account-limits-codex-work"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex_work"),
+      threadId: asThreadId("thread-1"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      payload: { rateLimits: { limit_id: "codex" } },
+    });
+    await harness.drain();
+
+    expect(ingested).toEqual([
+      {
+        provider: "codex",
+        providerInstanceId: "codex_work",
+        payload: { limit_id: "codex" },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+  });
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();
