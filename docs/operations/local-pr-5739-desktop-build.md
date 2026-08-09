@@ -30,11 +30,14 @@ instances resolving to the same sessions directory; copying the newest shared
 record would incorrectly show identical usage for every account.
 
 On first start after this fix, cached transcript-derived copies for such a
-group are removed automatically. Each instance initially shows `No limit data
-yet` until it emits its own tagged live rate-limit event (normally after its
-app-server/session starts). Live snapshots remain separate by instance and are
-persisted across restarts. Instances with genuinely separate `homePath`
-directories still recover independently from their own transcripts.
+group are removed automatically. The normal per-instance provider health probe
+starts each configured Codex app-server briefly and requests
+`account/rateLimits/read`, so every authenticated shadow account fills its own
+meter without requiring a chat session. The web client refreshes the limits
+query when those probes publish their results. Live snapshots remain separate
+by instance and are persisted across restarts. Instances with genuinely
+separate `homePath` directories still recover independently from their own
+transcripts.
 
 Keep this change as one local commit so it can be cherry-picked onto a refreshed
 PR or onto `main` after the upstream PR merges.

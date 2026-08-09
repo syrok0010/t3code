@@ -16,7 +16,7 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
@@ -110,18 +110,51 @@ export function mergeAccountLimitSnapshots(
   );
 }
 
+export function accountLimitsProviderCheckKey(
+  environments: ReadonlyArray<EnvironmentLimitsStatus>,
+): string {
+  return environments
+    .flatMap((environment) =>
+      environment.providers
+        .filter((provider) => provider.driver === "codex" && provider.enabled)
+        .map(
+          (provider) =>
+            `${environment.environmentId}:${provider.instanceId}:${provider.checkedAt}:${provider.status}`,
+        ),
+    )
+    .sort()
+    .join("|");
+}
+
+function refreshAccountLimits(environments: ReadonlyArray<EnvironmentLimitsStatus>): void {
+  for (const environment of environments) {
+    appAtomRegistry.refresh(
+      serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
+    );
+  }
+}
+
 export function useAccountLimits(): AccountLimitsView {
   const environments = useAtomValue(accountLimitsAtom);
+  const environmentsRef = useRef(environments);
+  environmentsRef.current = environments;
 
   const snapshots = useMemo(() => mergeAccountLimitSnapshots(environments), [environments]);
+  const providerCheckKey = useMemo(
+    () => accountLimitsProviderCheckKey(environments),
+    [environments],
+  );
 
-  const refresh = useCallback(() => {
-    for (const environment of environments) {
-      appAtomRegistry.refresh(
-        serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
-      );
-    }
-  }, [environments]);
+  // Codex's provider health probe now fetches the account snapshot for every
+  // configured instance. It can finish after the first limits RPC answered,
+  // so re-read whenever a probe publishes a new checkedAt/status pair. The
+  // key ignores account-limit query results themselves, avoiding a refresh
+  // loop when this RPC completes.
+  useEffect(() => {
+    refreshAccountLimits(environmentsRef.current);
+  }, [providerCheckKey]);
+
+  const refresh = useCallback(() => refreshAccountLimits(environments), [environments]);
 
   const answered = environments.filter((environment) => environment.snapshots !== null).length;
   const stillReporting = environments.filter(

@@ -3,11 +3,12 @@
  *
  * Fed passively: runtime ingestion forwards every
  * `account.rate-limits.updated` event here (Claude usage snapshots and
- * single-window events, Codex app-server notifications), so the cache costs
- * nothing while sessions run. When asked and Codex has no live snapshot, the
- * newest transcript snapshot is recovered from disk. Claude has no disk
- * fallback: its limits exist only on the live stream, which is why snapshots
- * are persisted across restarts.
+ * single-window events, Codex app-server notifications), and each Codex
+ * provider health probe forwards its initial `account/rateLimits/read`
+ * response. When asked and Codex has no live snapshot, the newest unambiguous
+ * transcript snapshot is recovered from disk. Claude has no disk fallback:
+ * its limits exist only on the live stream, which is why snapshots are
+ * persisted across restarts.
  *
  * Snapshots are keyed by provider instance so independently configured
  * accounts never overwrite each other.

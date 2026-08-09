@@ -46,6 +46,7 @@ import {
 } from "./ProviderRegistry.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettingsModule from "../../serverSettings.ts";
+import * as AccountLimitsService from "../../usage/AccountLimitsService.ts";
 import { readProviderStatusCache, resolveProviderStatusCachePath } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import * as ProviderInstanceRegistry from "../Services/ProviderInstanceRegistry.ts";
@@ -1479,6 +1480,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
+            Layer.provideMerge(AccountLimitsService.layerTest),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1572,6 +1574,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
+            Layer.provideMerge(AccountLimitsService.layerTest),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1694,6 +1697,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               }),
             ),
             Layer.provideMerge(TestHttpClientLive),
+            Layer.provideMerge(AccountLimitsService.layerTest),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1756,6 +1760,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 }),
               ),
               Layer.provideMerge(TestHttpClientLive),
+              Layer.provideMerge(AccountLimitsService.layerTest),
               Layer.provideMerge(
                 Layer.succeed(
                   ProviderEventLoggers.ProviderEventLoggers,

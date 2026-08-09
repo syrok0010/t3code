@@ -21,7 +21,13 @@
  *
  * @module provider/Drivers/CodexDriver
  */
-import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  CodexSettings,
+  ProviderDriverKind,
+  type ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import type * as CodexSchema from "effect-codex-app-server/schema";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -34,6 +40,7 @@ import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneratio
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { AccountLimitsService } from "../../usage/AccountLimitsService.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
@@ -67,12 +74,23 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   nativeUpdate: null,
 });
 
+export const makeCodexProbeLimitsIngest =
+  (accountLimits: AccountLimitsService["Service"], providerInstanceId: ProviderInstanceId) =>
+  (rateLimits: CodexSchema.V2GetAccountRateLimitsResponse, observedAt: string) =>
+    accountLimits.ingest({
+      provider: DRIVER_KIND,
+      providerInstanceId,
+      payload: rateLimits,
+      createdAt: observedAt,
+    });
+
 /**
  * Services the driver needs to materialize an instance. Surfaced as the
  * driver's `R` so the registry layer aggregates these across every
  * registered driver and the runtime satisfies them once.
  */
 export type CodexDriverEnv =
+  | AccountLimitsService
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -119,6 +137,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
+      const accountLimits = yield* AccountLimitsService;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
@@ -166,7 +185,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
-      const checkProvider = checkCodexProviderStatus(effectiveConfig, undefined, processEnv).pipe(
+      const checkProvider = checkCodexProviderStatus(
+        effectiveConfig,
+        undefined,
+        processEnv,
+        makeCodexProbeLimitsIngest(accountLimits, instanceId),
+      ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );

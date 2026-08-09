@@ -45,6 +45,7 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  readonly rateLimits?: CodexSchema.V2GetAccountRateLimitsResponse | null;
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
@@ -389,24 +390,27 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   if (!accountResponse.account && accountResponse.requiresOpenaiAuth) {
     return {
       account: accountResponse,
+      rateLimits: null,
       version,
       models: appendCustomCodexModels([], input.customModels ?? []),
       skills: [],
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const [skillsResponse, models, rateLimits] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      client.request("account/rateLimits/read", undefined).pipe(Effect.option),
     ],
     { concurrency: "unbounded" },
   );
 
   return {
     account: accountResponse,
+    rateLimits: Option.getOrNull(rateLimits),
     version,
     models: applyPreferredCodexDefaultModel(
       appendCustomCodexModels(models, input.customModels ?? []),
@@ -515,6 +519,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
+  onRateLimits?: (
+    rateLimits: CodexSchema.V2GetAccountRateLimitsResponse,
+    observedAt: string,
+  ) => Effect.Effect<void>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -593,6 +601,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const snapshot = probeResult.success.value;
+  if (snapshot.rateLimits != null && onRateLimits !== undefined) {
+    yield* onRateLimits(snapshot.rateLimits, checkedAt);
+  }
   const accountStatus = accountProbeStatus(snapshot.account);
 
   return buildServerProvider({

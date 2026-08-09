@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mergeAccountLimitSnapshots } from "./accountLimits";
+import { accountLimitsProviderCheckKey, mergeAccountLimitSnapshots } from "./accountLimits";
 
 function snapshot(input: {
   readonly instanceId: string;
@@ -130,5 +130,30 @@ describe("mergeAccountLimitSnapshots", () => {
     ]);
 
     expect(merged.map((entry) => entry.displayName)).toEqual(["codex_personal", "codex_work"]);
+  });
+});
+
+describe("accountLimitsProviderCheckKey", () => {
+  it("changes when an enabled Codex instance finishes a newer health probe", () => {
+    const environment = {
+      environmentId: "environment-1" as EnvironmentId,
+      isPending: false,
+      snapshots: [],
+      providers: [provider("codex_work", "Work")],
+    };
+    const first = accountLimitsProviderCheckKey([environment]);
+    const second = accountLimitsProviderCheckKey([
+      {
+        ...environment,
+        providers: [
+          {
+            ...environment.providers[0]!,
+            checkedAt: "2026-08-09T12:01:00.000Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(first).not.toBe(second);
   });
 });
