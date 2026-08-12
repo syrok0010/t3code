@@ -209,6 +209,74 @@ The Windows warning about a missing WSL `node-pty` prebuild is known: native
 Windows terminals work, but the packaged WSL backend does not start unless a
 Linux `pty.node` is supplied separately.
 
+## Deploy a verified Windows ZIP to syrok's Desktop
+
+The build host can deploy the Windows ZIP over the WireGuard network when the
+Windows machine is online. The target is `syrok@10.9.0.5`; SSH public-key
+authentication is already configured from this host. Do this only after the
+Windows archive has passed the verification below.
+
+First, require both SSH access and the expected Desktop path:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=8 syrok@10.9.0.5 \
+  powershell.exe -NoProfile -NonInteractive -Command \
+  "[Environment]::GetFolderPath('Desktop')"
+```
+
+It must print `C:\Users\syrok\Desktop`. If the command fails, leave the
+artifact on the build host and report that the Windows machine is unavailable.
+
+For a verified archive, set its path and copy it to a unique temporary name in
+the remote user's home directory:
+
+```bash
+export T3_WINDOWS_ARCHIVE="$T3_BUILD_ROOT/windows/T3-Code-<version>-x64.zip"
+export T3_WINDOWS_ARCHIVE_NAME="$(basename "$T3_WINDOWS_ARCHIVE")"
+export T3_WINDOWS_STAGE="t3code-deploy-${T3_BUILD_STAMP}-${T3_WINDOWS_ARCHIVE_NAME}"
+export T3_WINDOWS_DATE="$(TZ=Europe/Moscow date +%d.%m)"
+
+scp "$T3_WINDOWS_ARCHIVE" "syrok@10.9.0.5:$T3_WINDOWS_STAGE"
+```
+
+Then create the Desktop directory and unpack. The archive filename determines
+the base directory, for example `T3-Code-0.0.33-x64`. If it already exists,
+the deployment uses `_12.08`; if that also exists, it uses `_12.08_2`, then
+increments the final number. Existing directories are never replaced.
+
+```bash
+ssh -T -o BatchMode=yes -o ConnectTimeout=8 syrok@10.9.0.5 \
+  powershell.exe -NoProfile -NonInteractive -Command - <<POWERSHELL
+\$ErrorActionPreference = 'Stop'
+\$archive = Join-Path \$HOME '$T3_WINDOWS_STAGE'
+\$desktop = [Environment]::GetFolderPath('Desktop')
+\$baseName = [System.IO.Path]::GetFileNameWithoutExtension(\$archive)
+\$target = Join-Path \$desktop \$baseName
+
+if (Test-Path -LiteralPath \$target) {
+  \$datedBase = '{0}_{1}' -f \$baseName, '$T3_WINDOWS_DATE'
+  \$target = Join-Path \$desktop \$datedBase
+  \$index = 2
+  while (Test-Path -LiteralPath \$target) {
+    \$target = Join-Path \$desktop ('{0}_{1}_{2}' -f \$baseName, '$T3_WINDOWS_DATE', \$index)
+    \$index++
+  }
+}
+
+New-Item -ItemType Directory -Path \$target -ErrorAction Stop | Out-Null
+Expand-Archive -LiteralPath \$archive -DestinationPath \$target -ErrorAction Stop
+if (-not (Test-Path -LiteralPath (Join-Path \$target 'T3 Code (Alpha).exe'))) {
+  throw "Deployment failed: T3 Code executable is missing from \$target"
+}
+Remove-Item -LiteralPath \$archive -Force
+Write-Output "DEPLOYED_TO=\$target"
+POWERSHELL
+```
+
+Completion requires the `DEPLOYED_TO=` line and the full path to a Desktop
+directory. Keep the local ZIP; the remote temporary ZIP is removed only after
+the executable is present.
+
 ## Verify and clean up
 
 Use the actual version printed by the build in place of `<version>`:
